@@ -1,0 +1,492 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Simplified Corrective RAG Workshop'
+Parameters:
+  DeploymentArtifactsS3BucketName:
+    Description: The S3 bucket that contains the artifacts for deployment
+    Type: String
+    Default: <Your S3 bucket name that contains these files - py312_opensearch-py_requests_and_requests-aws4auth.zip, wikipedia_search_bedrock_agent.zip>
+  LambdaLayerS3FileKey:
+    Description: The name of the zip file in S3 that contains the Lambda Layer content
+    Type: String
+    Default: py312_opensearch-py_requests_and_requests-aws4auth.zip
+  WikipediaSearchLambdaFunctionCodeS3FileKey:
+    Description: The name of the zip file in S3 that contains the Lambda function code to perform Wikipedia search
+    Type: String
+    Default: wikipedia_search_bedrock_agent.zip
+  CodeRepositoryURL:
+    Description: The URL to the code repository
+    Type: String
+    Default: https://github.com/aws-samples/simplified-corrective-rag/
+Resources:
+  WorkshopS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join [ "-", [ Ref: AWS::AccountId, "simplified-crag" ] ]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+  AOSSExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: "SimplifiedCRAG-AOSSExecutionRole"
+      Description: AOSS execution role for simplified-crag collection
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - opensearch.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws:iam::aws:policy/IAMFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonBedrockFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccessV2'        
+      Policies:
+        - PolicyName: aossrolepolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource:
+                  - !Join [ "", [ "arn:aws:aoss:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":collection/*" ] ]
+                  - !Join [ "", [ "arn:aws:aoss:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":index/*/*" ] ]
+    DependsOn:
+      - WorkshopS3Bucket
+  WikipediaSearchLambdaFunctionExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: "SimplifiedCRAG-WSLambdaFunctionExecutionRole"
+      Description: Lambda execution role for simplified-crag
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccessV2'
+  AOSSIndexCreationLambdaFunctionExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: "SimplifiedCRAG-AOICLambdaFunctionExecutionRole"
+      Description: Lambda execution role for simplified-crag
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccessV2'
+      Policies:
+        - PolicyName: lambdarolepolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource:
+                  - !Join [ "", [ "arn:aws:aoss:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":collection/*" ] ]
+                  - !Join [ "", [ "arn:aws:aoss:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":index/*/*" ] ]
+  BedrockAndSMExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: "SimplifiedCRAG-BedrockAndSMExecutionRole"
+      Description: Bedrock and SM notebook execution role for simplified-crag
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+                - bedrock.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws:iam::aws:policy/IAMFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonBedrockFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonSageMakerFullAccess'
+        - 'arn:aws:iam::aws:policy/AWSCodeCommitFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccessV2' 
+      Policies:
+        - PolicyName: bedrockandsmrolepolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource:
+                  - !Join [ "", [ "arn:aws:aoss:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":collection/*" ] ]
+                  - !Join [ "", [ "arn:aws:aoss:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":index/*/*" ] ]            
+    DependsOn:
+      - WorkshopS3Bucket
+  BedrockAgentExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: "AmazonBedrockExecutionRoleForAgents_simplified-crag"
+      Description: Bedrock Agent execution role for simplified-crag
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                "aws:SourceAccount":
+                  Ref: AWS::AccountId
+              ArnLike:
+                "AWS:SourceArn": !Join [ "", [ "arn:aws:bedrock:", !Ref AWS::Region, ":", !Ref AWS::AccountId, ":agent/*" ] ]
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/IAMFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonBedrockFullAccess'
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchFullAccessV2'
+    DependsOn:
+      - WikipediaSearchLambdaFunction
+  AOSSDataAccessPolicy:
+    Type: 'AWS::OpenSearchServerless::AccessPolicy'
+    Properties:
+      Name: simplified-crag-dap
+      Type: data
+      Description: Data access policy for simplified-crag collection
+      Policy: !Sub >-
+        [{"Description":"Access for cfn user","Rules":[{"ResourceType":"index","Resource":["index/simplified-crag-collection/*"],"Permission":["aoss:*"]},
+        {"ResourceType":"collection","Resource":["collection/simplified-crag-collection"],"Permission":["aoss:*"]}],
+        "Principal":["arn:aws:iam::${AWS::AccountId}:role/SimplifiedCRAG-AOSSExecutionRole", "arn:aws:iam::${AWS::AccountId}:role/SimplifiedCRAG-BedrockAndSMExecutionRole",
+        "arn:aws:iam::${AWS::AccountId}:role/SimplifiedCRAG-AOICLambdaFunctionExecutionRole"]}]
+    DependsOn:
+      - AOSSExecutionRole
+      - AOSSIndexCreationLambdaFunctionExecutionRole
+      - BedrockAndSMExecutionRole
+  AOSSNetworkPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: simplified-crag-np
+      Type: network
+      Description: Network policy for simplified-crag collection
+      Policy: >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/simplified-crag-collection"]}, {"ResourceType":"dashboard","Resource":["collection/simplified-crag-collection"]}],"AllowFromPublic":true}]
+  AOSSEncryptionPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: simplified-crag-sp
+      Type: encryption
+      Description: Encryption policy for simplified-crag collection
+      Policy: >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/simplified-crag-collection"]}],"AWSOwnedKey":true}
+  AOSSCollection:
+    Type: 'AWS::OpenSearchServerless::Collection'
+    Properties:
+      Name: simplified-crag-collection
+      Type: VECTORSEARCH
+      Description: Collection to hold the embeddings for the content to query
+    DependsOn:
+      - AOSSEncryptionPolicy
+      - AOSSNetworkPolicy
+      - AOSSDataAccessPolicy
+  LambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: simplified-crag-py312_opensearch-py_requests_and_requests-aws4auth
+      Description: Python 3.12 opensearch-py, requests and requests-aws4auth packages
+      CompatibleArchitectures:
+        - x86_64
+      CompatibleRuntimes:
+        - python3.12
+      Content:
+        S3Bucket:
+          Ref: DeploymentArtifactsS3BucketName
+        S3Key:
+          Ref: LambdaLayerS3FileKey
+  AOSSIndexCreationLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Function to create the AOSS Index
+      Handler: index.lambda_handler
+      FunctionName: simplified-crag-aoss-index-creation
+      MemorySize: 128
+      Runtime: python3.12
+      Role: !GetAtt AOSSIndexCreationLambdaFunctionExecutionRole.Arn
+      Timeout: 240
+      Environment:
+        Variables:
+          REGION:
+            Ref: AWS::Region
+          AOSSCOLLECTIONID: !GetAtt AOSSCollection.Id
+          AOSSINDEXNAME: simplified-crag-index
+      Code:
+        ZipFile: |
+          import botocore.session
+          from botocore.credentials import Credentials
+          import cfnresponse
+          import json
+          from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth
+          import os
+          import time
+
+
+          # Function to create the OpenSearch client for AOSS
+          def get_os_client(region, collection_id):
+              host = "{}.{}.aoss.amazonaws.com".format(collection_id, region)
+              # Get the credentials from the boto3 session
+              credentials = botocore.session.Session().get_credentials()
+              auth = AWSV4SignerAuth(credentials, region, 'aoss')
+              # Create an OpenSearch client and use the request-signer
+              os_client = OpenSearch(
+                  hosts=[{'host': host, 'port': 443}],
+                  http_auth=auth,
+                  use_ssl=True,
+                  verify_certs=True,
+                  connection_class=RequestsHttpConnection,
+                  pool_maxsize=20,
+                  timeout=3000
+              )
+              return os_client
+
+
+          # Function to create the OpenSearch index
+          def create_index(aoss_py_client, index_name):
+              knn_index = {
+                  "settings": {
+                      "index.knn": True,
+                  },
+                  "mappings": {
+                      "properties": {
+                          "vector": {
+                              "type": "knn_vector",
+                              "dimension": 1536,
+                              "method": {
+                                "engine": "faiss",
+                                "name": "hnsw"
+                              }
+                          },
+                          "text": {
+                              "type": "text"
+                          },
+                          "metadata": {
+                              "type": "text"
+                          }
+                      }
+                  }
+              }
+              aoss_py_client.indices.create(index=index_name, body=knn_index, ignore=400)
+
+
+          # Function to delete the OpenSearch index
+          def delete_index(aoss_py_client, index_name):
+              aoss_py_client.indices.delete(index=index_name, ignore=400)
+
+
+           # Lambda handler function
+          def lambda_handler(event, context):
+              response_data = {}
+              response_data['Data'] = ''
+              print(event)
+              print(context)
+              physical_record_id = context.log_group_name
+              try:
+                  # Get the input parameters
+                  region = os.environ['REGION']
+                  collection_id = os.environ['AOSSCOLLECTIONID']
+                  index_name = os.environ['AOSSINDEXNAME']
+                  # Create the client
+                  aoss_py_client = get_os_client(region, collection_id)
+                  # Process based on event type
+                  if event['RequestType'] == 'Create':
+                      # Create the AOSS index
+                      print('Creating the AOSS index "{}"'.format(index_name))                     
+                      create_index(aoss_py_client, index_name)
+                      print('Created the AOSS index "{}"'.format(index_name))
+                      print('Waiting for 60 seconds...')
+                      time.sleep(60)
+                      print('Completed waiting for 60 seconds.')
+                  elif event['RequestType'] == 'Delete':
+                      # Delete the AOSS index
+                      print('Deleting the AOSS index "{}"'.format(index_name))
+                      delete_index(aoss_py_client, index_name)
+                      print('Deleted the AOSS index "{}"'.format(index_name))
+                      print('Waiting for 60 seconds...')
+                      time.sleep(60)
+                      print('Completed waiting for 60 seconds.')
+                  else:
+                      print('Skipped creating/deleting the AOSS index "{}"'.format(index_name))
+                  # Send the SUCCESS response to CloudFormation
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+              except Exception as exception:
+                  print('Exception occurred :: {}'.format(exception))
+                  # Send the FAILED response to CloudFormation
+                  cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+      Layers:
+        - !GetAtt LambdaLayer.LayerVersionArn
+    DependsOn:
+      - AOSSCollection
+      - LambdaLayer
+      - AOSSIndexCreationLambdaFunctionExecutionRole
+  AOSSIndexCreationLambdaFunctionInvoke:
+    Type: AWS::CloudFormation::CustomResource
+    Version: "1.0"
+    Properties:
+      ServiceToken: !GetAtt AOSSIndexCreationLambdaFunction.Arn
+    DependsOn:
+      - AOSSIndexCreationLambdaFunction
+  BedrockKB:
+    Type: 'AWS::Bedrock::KnowledgeBase'
+    Properties:
+      Name: simplified-crag-bedrock-kb
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Join [ "", [ "arn:aws:bedrock:", !Ref AWS::Region, "::foundation-model/amazon.titan-embed-text-v1" ] ]
+      StorageConfiguration:
+        OpensearchServerlessConfiguration:
+          CollectionArn: !GetAtt AOSSCollection.Arn
+          FieldMapping:
+            MetadataField: metadata
+            TextField: text
+            VectorField: vector
+          VectorIndexName: simplified-crag-index
+        Type: OPENSEARCH_SERVERLESS
+      RoleArn: !GetAtt BedrockAndSMExecutionRole.Arn
+      Description: Knowledge Base to provide the RAG capability
+    DependsOn:
+      - AOSSCollection
+      - AOSSIndexCreationLambdaFunctionInvoke
+      - WorkshopS3Bucket
+      - BedrockAndSMExecutionRole
+  BedrockKBDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      Name: simplified-crag-bedrock-kb-ds
+      Description: Data Source for the Knowledge Base that provides the RAG capability
+      KnowledgeBaseId: !GetAtt BedrockKB.KnowledgeBaseId
+      DataSourceConfiguration:
+        S3Configuration:
+          BucketArn: !GetAtt WorkshopS3Bucket.Arn
+        Type: S3
+    DependsOn:
+      - BedrockKB
+  WikipediaSearchLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Function to perform the Wikipedia search
+      Handler: lambda_function.lambda_handler
+      FunctionName: simplified-crag-wikipedia-search
+      MemorySize: 128
+      Runtime: python3.12
+      Role: !GetAtt WikipediaSearchLambdaFunctionExecutionRole.Arn
+      Timeout: 240
+      Environment:
+        Variables:
+          APP_NAME: WikipediaSearchApp
+          LOG_LEVEL: INFO
+          MAX_NUMBER_OF_RESULTS: 15
+          WIKIPEDIA_ENDPOINT_URL: https://api.wikimedia.org/core/v1/wikipedia/en/search/page
+      Code:
+        S3Bucket:
+          Ref: DeploymentArtifactsS3BucketName
+        S3Key:
+          Ref: WikipediaSearchLambdaFunctionCodeS3FileKey
+      Layers:
+        - !GetAtt LambdaLayer.LayerVersionArn
+    DependsOn:
+      - LambdaLayer
+      - WikipediaSearchLambdaFunctionExecutionRole
+  BedrockAgent:
+    Type: 'AWS::Bedrock::Agent'
+    Properties:
+      AgentName: simplified-crag-bedrock-agent
+      Description: Bedrock Agent that provides the orchestration capability
+      AgentResourceRoleArn: !GetAtt BedrockAgentExecutionRole.Arn
+      ActionGroups:
+        - ActionGroupExecutor:
+            Lambda: !GetAtt WikipediaSearchLambdaFunction.Arn
+          ActionGroupName: simplified-crag-bedrock-agent-action-group
+          ActionGroupState: ENABLED
+          Description: Bedrock Agent action group for Wikipedia search
+          FunctionSchema:
+            Functions:
+              - Description: Action group Lambda function for Wikipedia search
+                Name: simplified-crag-wikipedia-search
+                Parameters:
+                  SearchString:
+                    Description: The Wikipedia search string
+                    Required: true
+                    Type: string
+      AutoPrepare: true
+      FoundationModel: anthropic.claude-3-haiku-20240307-v1:0
+      Instruction: You are an expert in Natural Language Understanding (NLU). You will respond to the user query by looking at the data provided in the user input. If you cannot find the answer there, then, perform a wikipedia search using the provided action groups and retrieve the answer from the wikipedia search results. Do not make up an answer.
+    DependsOn:
+      - WikipediaSearchLambdaFunction
+      - BedrockAgentExecutionRole
+  BedrockAgentAlias:
+    Type: 'AWS::Bedrock::AgentAlias'
+    Properties:
+      AgentAliasName: simplified-crag-bedrock-agent-alias
+      Description: Bedrock Agent alias that provides the orchestration capability
+      AgentId: !GetAtt BedrockAgent.AgentId
+    DependsOn:
+      - BedrockAgent
+  BedrockAgentAccessToWikipediaSearchLambdaFunction:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt WikipediaSearchLambdaFunction.Arn
+      Principal: bedrock.amazonaws.com
+      SourceAccount: 
+        Ref: AWS::AccountId
+    DependsOn:
+      - BedrockAgentAlias
+      - WikipediaSearchLambdaFunction
+  CodeRepository:
+    Type: AWS::SageMaker::CodeRepository
+    Properties:
+      GitConfig:
+          RepositoryUrl:
+            Ref: CodeRepositoryURL
+  SMNotebookInstance:
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      NotebookInstanceName: simplified-crag-instance
+      PlatformIdentifier: notebook-al2-v2
+      InstanceType: ml.t3.medium
+      RoleArn: !GetAtt BedrockAndSMExecutionRole.Arn
+      DefaultCodeRepository: !GetAtt CodeRepository.CodeRepositoryName
+    DependsOn:
+      - BedrockAndSMExecutionRole
+      - CodeRepository

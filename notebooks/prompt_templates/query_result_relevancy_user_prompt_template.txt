@@ -1,0 +1,17 @@
+Carefully take a look at the texts specified in the <QUERY> and <QUERY_RESULT> tags.
+
+<QUERY>
+{QUERY}
+</QUERY>
+
+<QUERY_RESULT>
+{QUERY_RESULT}
+</QUERY_RESULT>
+
+Your response should be based on the instructions specified in the <INSTRUCTIONS> tag.
+<INSTRUCTIONS>
+Your response should be a valid number from 0 to 1.
+Do not include any preamble or postamble.
+</INSTRUCTIONS>
+
+In a scale of 0 to 1, with 0 being irrelevant and 1 being the most relevant, how relevant is the response in the <QUERY_RESULT> tag to the query in the <QUERY> tag?
